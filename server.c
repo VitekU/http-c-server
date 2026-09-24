@@ -7,15 +7,63 @@
 #include <sys/_types/_ssize_t.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 #define PORT 8080
+
+
+typedef struct {
+    char *method;
+    char *target;
+    char* version;
+} Http_request_line;
+
+typedef enum {
+    SERVER_OK,
+    SERVER_INTERNAL_ERROR,
+    SERVER_BAD_REQUEST
+} ServerStatus;
+
+
+ServerStatus process_requst(const char *request, Http_request_line *req_line) {
+    if (!request || !req_line) return SERVER_INTERNAL_ERROR;
+
+    char *end = strchr(request, '\n');
+    int len = end ? (int)(end - request) : strlen(request);
+
+    if (len > 0 && request[len - 1] == '\r') {
+        len--;
+    }
+
+    char *request_line = malloc(len + 1);
+    memcpy(request_line, request, len);
+    request_line[len] = '\0';
+
+    char *method  = strtok(request_line, " ");
+    char *target  = strtok(NULL, " ");
+    char *version = strtok(NULL, " ");
+
+    if (!method || !target || !version) {
+        free(request_line);
+        return SERVER_BAD_REQUEST;
+    }
+    req_line->method  = strdup(method);
+    req_line->target  = strdup(target);
+    req_line->version = strdup(version);
+
+    free(request_line);
+    return SERVER_OK;
+}
+
+
 
 int handle_client(int client_socket) {
     char buffer[1000];
     ssize_t bytes = 0;
+    Http_request_line http_req_line;
 
     // response with HTTP/1.0
-    const char* res = "HTTP/1.0 200 OK\r\n\r\n<p>Hello world!</p>";
+    const char* res;
 
     printf("\n----\n");
     while (1) {
@@ -32,7 +80,27 @@ int handle_client(int client_socket) {
             break;
         }
 
-        printf("REQUEST BODY:\n----\n%s", buffer);
+        printf("REQUEST BODY:\n");
+        ServerStatus status = process_requst(buffer, &http_req_line);
+
+        printf("%s\n", http_req_line.method);
+        printf("%s\n", http_req_line.target);
+        printf("%s\n", http_req_line.version);
+
+        if (status == SERVER_OK) {
+            if (strcmp(http_req_line.target, "/secret") == 0) {
+                res = "HTTP/1.0 200 OK\r\n\r\n<p>Pssst, this is a secret message</p>";
+            }
+            else {
+                res = "HTTP/1.0 200 OK\r\n\r\n<p>Hello world!</p>";
+            }
+        }
+        else if (status == SERVER_INTERNAL_ERROR) {
+             res = "HTTP/1.0 500 Internal Server Error\r\n\r\n<p>Internal server error!</p>";
+        }
+        else {
+             res = "HTTP/1.0 400 Bad request\r\n\r\n<p>Error</p>";
+        }
 
         // sending the reponse by writing to the file descriptor client_socket
         write(client_socket, res, strlen(res));
